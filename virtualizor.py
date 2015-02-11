@@ -401,8 +401,11 @@ local-hostname: {{ hostname }}
         i = 0
 
         for info in definition['nics']:
+            mac = info.get('mac', random_mac())
+            if mac == "none":
+                mac = random_mac()
             self.meta['nics'].append({
-                'mac': info.get('mac', random_mac()),
+                'mac': mac,
                 'name': info.get('name', 'noname%i' % i),
                 'network_name': info.get(
                     'network_name', '%s_sps' % self.conf.prefix)})
