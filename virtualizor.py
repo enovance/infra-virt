@@ -320,13 +320,6 @@ local-hostname: {{ hostname }}
         if definition['profile'] == 'install-server':
             logging.info("  This is the install-server")
             self.meta['is_install_server'] = True
-            definition['disks'] = [
-                {'name': 'vda',
-                 'size': '30G',
-                 'clone_from':
-                     '/var/lib/libvirt/images/install-server-%s.img.qcow2' %
-                         install_server_info['version']}
-            ]
             definition['nics'].append({
                 'mac': install_server_info['mac'],
                 'network_name': conf.public_network
@@ -383,12 +376,12 @@ local-hostname: {{ hostname }}
         cpt = 0
         for info in definition['disks']:
             filename = "%s-%03d.qcow2" % (self.hostname_with_prefix, cpt)
-            if 'clone_from' in info:
+            if 'image' in info:
                 self.hypervisor.call(
                     'qemu-img', 'create', '-q', '-f', 'qcow2',
-                    '-b', info['clone_from'],
+                    '-b', info['image'],
                     Host.host_libvirt_image_dir + '/' + filename,
-                    info['size'])
+                    canical_size(info['size']))
                 self.hypervisor.call(
                     'qemu-img', 'resize', '-q',
                     Host.host_libvirt_image_dir + '/' + filename,
