@@ -74,56 +74,65 @@ class TestVirtualizor(testtools.TestCase):
         self.virtualizor.main(['virt_platform.yml.sample', 'bar',
                                '--pub-key-file', 'virt_platform.yml.sample'])
         sub_call.assert_has_calls(
-            [call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', '-b', 'openstack-full-RH7.0-I.1.3.0.img.qcow2',
-                   img_dir + '/default_os-ci-test10-000.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'resize', '-q',
-                   img_dir + '/default_os-ci-test10-000.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test10-001.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test10-002.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test10-003.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', '-b', 'openstack-full-RH7.0-I.1.3.0.img.qcow2',
+            [call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', '-b',
+                   'openstack-full-RH7.0-I.1.3.0.img.qcow2', img_dir +
+                   '/default_os-ci-test10-000.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'resize', '-q', img_dir +
+                   '/default_os-ci-test10-000.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test10-001.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test10-002.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test10-003.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', '-b',
+                   'openstack-full-RH7.0-I.1.3.0.img.qcow2',
                    img_dir + '/default_os-ci-test12-000.qcow2',
                    '10000000000']),
              call(['ssh', 'root@bar', 'qemu-img', 'resize', '-q',
                    img_dir + '/default_os-ci-test12-000.qcow2',
                    '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test12-001.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test12-002.qcow2',
-                   '10000000000']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', img_dir + '/default_os-ci-test12-003.qcow2',
-                   '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test12-001.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test12-002.qcow2', '10000000000']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q',
+                   '-f', 'qcow2', img_dir +
+                   '/default_os-ci-test12-003.qcow2', '10000000000']),
              call(['ssh', 'root@bar', 'mkdir', '-p',
                    '/tmp/default_os-ci-test4_data']),
              call(['scp', '-q', '-r', mock.ANY,
                    'root@bar:/tmp/default_os-ci-test4_data/meta-data']),
              call(['scp', '-q', '-r', mock.ANY,
                    'root@bar:/tmp/default_os-ci-test4_data/user-data']),
-             call(['ssh', 'root@bar', 'genisoimage', '-quiet', '-output',
-                   img_dir + '/default_os-ci-test4_cloud-init.iso', '-volid',
-                   'cidata', '-joliet', '-rock',
+             call(['ssh', 'root@bar', 'truncate', '--size', '2M',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2.tmp']),
+             call(['ssh', 'root@bar', 'mkfs.vfat', '-n', 'cidata',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2.tmp']),
+             call(['ssh', 'root@bar', 'mcopy', '-oi',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2.tmp',
                    '/tmp/default_os-ci-test4_data/user-data',
-                   '/tmp/default_os-ci-test4_data/meta-data']),
-             call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f',
-                   'qcow2', '-b', 'install-server-RH7.0-I.1.3.0.img.qcow2',
+                   '/tmp/default_os-ci-test4_data/meta-data', '::']),
+             call(['ssh', 'root@bar', 'qemu-img', 'convert', '-O', 'qcow2',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2.tmp',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2']),
+             call(['ssh', 'root@bar', 'rm', 'qcow2',
+                   img_dir + '/default_os-ci-test4_cloud-init.qcow2.tmp']),
+             call(['ssh', 'root@bar', 'qemu-img', 'create',
+                   '-q', '-f', 'qcow2',
+                   '-b', 'install-server-RH7.0-I.1.3.0.img.qcow2',
                    img_dir + '/default_os-ci-test4-000.qcow2', '20000000000']),
              call(['ssh', 'root@bar', 'qemu-img', 'resize', '-q',
                    img_dir + '/default_os-ci-test4-000.qcow2', '20000000000'])]
         )
-        self.assertEqual(sub_call.call_count, 16)
+        self.assertEqual(sub_call.call_count, 20)
         self.assertEqual(libvirt_conn.networkCreateXML.call_count, 1)
         self.assertEqual(libvirt_conn.defineXML.call_count, 3)
 
@@ -131,7 +140,7 @@ class TestVirtualizor(testtools.TestCase):
     def test_main_with_replace(self, sub_call):
         self.virtualizor.main(['--replace', 'virt_platform.yml.sample', 'bar',
                                '--pub-key-file', 'virt_platform.yml.sample'])
-        self.assertEqual(sub_call.call_count, 21)
+        self.assertEqual(sub_call.call_count, 25)
         self.assertEqual(libvirt_conn.networkCreateXML.call_count, 2)
         self.assertEqual(libvirt_conn.defineXML.call_count, 4)
 

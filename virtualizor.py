@@ -203,10 +203,10 @@ class Host(object):
 {% endfor %}
 {% if is_install_server is defined %}
     <disk type='file' device='disk'>
-      <driver name='qemu' type='raw'/>
+      <driver name='qemu' type='qcow2'/>
       <source
         file='/var/lib/libvirt/images/{{
-          hostname_with_prefix }}_cloud-init.iso'/>
+          hostname_with_prefix }}_cloud-init.qcow2'/>
       <target dev='vdz' bus='virtio'/>
     </disk>
 {% endif %}
@@ -364,13 +364,20 @@ local-hostname: {{ hostname }}
             fd.flush()
             self.hypervisor.push(fd.name, data_dir + '/' + name)
 
-        self.hypervisor.call(
-            'genisoimage', '-quiet', '-output',
-            "%s/%s_cloud-init.iso" % (
+        image = '%s/%s_cloud-init.qcow2' % (
                 Host.host_libvirt_image_dir,
-                self.hostname_with_prefix),
-            '-volid', 'cidata', '-joliet', '-rock',
-            data_dir + '/user-data', data_dir + '/meta-data')
+                self.hostname_with_prefix)
+        self.hypervisor.call(
+            'truncate', '--size', '2M', image + '.tmp')
+        self.hypervisor.call(
+            'mkfs.vfat', '-n', 'cidata', image + '.tmp')
+        self.hypervisor.call(
+            'mcopy', '-oi', image + '.tmp',
+            data_dir + '/user-data', data_dir + '/meta-data', '::')
+        self.hypervisor.call(
+            'qemu-img', 'convert', '-O', 'qcow2', image + '.tmp', image)
+        self.hypervisor.call(
+            'rm', 'qcow2', image + '.tmp')
 
     def register_disks(self, definition):
         cpt = 0
