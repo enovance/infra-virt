@@ -250,28 +250,25 @@ write_files:
     content: |
       Defaults:jenkins !requiretty
       jenkins ALL=(ALL) NOPASSWD:ALL
-  - path: /etc/sysconfig/network-scripts/ifcfg-eth0
+{% for nic in nics %}
+  - path: /etc/sysconfig/network-scripts/ifcfg-{{ nic.name }}
     content: |
-      DEVICE=eth0
+      DEVICE={{ nic.name }}
+      ONBOOT=yes
+{% if nic.ip is defined %}
       BOOTPROTO=none
-      ONBOOT=yes
-      IPADDR={{ ip }}
-      NETWORK={{ network }}
-      NETMASK={{ netmask }}
-# Do not set the default GW to avoid conflict
-# with the outgoing route on eth1
-#      GATEWAY={{ gateway }}
-  - path: /etc/sysconfig/network-scripts/ifcfg-eth1
-    content: |
-      DEVICE=eth1
+      IPADDR={{ nic.ip }}
+      NETWORK={{ nic.network }}
+      NETMASK={{ nic.netmask }}
+{% else %}
       BOOTPROTO=dhcp
-      ONBOOT=yes
+{% endif %}
+{% endfor %}
   - path: /etc/sysconfig/network
     content: |
       NETWORKING=yes
       NOZEROCONF=no
       HOSTNAME={{ hostname }}
-#      GATEWAY={{ gateway }}
   - path: /etc/sysctl.conf
     content: |
       net.ipv4.ip_forward = 1
@@ -320,31 +317,25 @@ local-hostname: {{ hostname }}
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         self.template = env.from_string(Host.host_template_string)
 
+        for nic in definition['nics']:
+            self.register_nic(nic)
         for disk in definition['disks']:
             self.initialize_disk(disk)
             self.register_disk(disk)
         if 'image' in definition['disks'][0]:
-            cloud_init_image = self.create_cloud_init_image(
-                ip=install_server_info['ip'],
-                network=install_server_info['network'],
-                netmask=install_server_info['netmask'],
-                gateway=install_server_info['gateway'])
+            cloud_init_image = self.create_cloud_init_image()
             self.register_disk(cloud_init_image)
-        self.register_nics(definition)
 
         self.meta['nics'][0]['boot_order'] = 2
         self.meta['disks'][0]['boot_order'] = 1
 
-    def create_cloud_init_image(self, ip, network, netmask, gateway):
+    def create_cloud_init_image(self):
 
         ssh_key_file = self.conf.pub_key_file
         meta = {
             'ssh_keys': open(ssh_key_file).readlines(),
             'hostname': self.hostname,
-            'ip': ip,
-            'network': network,
-            'netmask': netmask,
-            'gateway': gateway
+            'nics': self.meta['nics']
         }
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         contents = {
@@ -402,16 +393,14 @@ local-hostname: {{ hostname }}
         disk['name'] = 'vd' + string.ascii_lowercase[disk_cpt]
         self.meta['disks'].append(disk)
 
-    def register_nics(self, definition):
-        i = 0
-
-        for info in definition['nics']:
-            self.meta['nics'].append({
-                'mac': info.get('mac', random_mac()),
-                'name': info.get('name', 'noname%i' % i),
-                'network_name': info.get(
-                    'network_name', '%s_sps' % self.conf.prefix)})
-            i += 1
+    def register_nic(self, nic):
+        default = {
+            'mac': random_mac(),
+            'name': 'eth%i' % len(self.meta['nics']),
+            'network_name': '%s_sps' % self.conf.prefix
+        }
+        default.update(nic)
+        self.meta['nics'].append(default)
 
     def dump_libvirt_xml(self):
         return self.template.render(self.meta)
