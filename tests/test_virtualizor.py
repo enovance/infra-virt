@@ -15,7 +15,6 @@
 # under the License.
 
 import mock
-from mock import call
 import testtools
 import unittest
 
@@ -69,64 +68,19 @@ class TestVirtualizor(testtools.TestCase):
 
     @mock.patch('virtualizor.subprocess.call')
     def test_main(self, sub_call):
-
-        img_dir = '/var/lib/libvirt/images'
-        self.virtualizor.main(['virt_platform.yml.sample', 'bar',
-                          '--pub-key-file', 'virt_platform.yml.sample'])
-        sub_call.assert_has_calls([
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test10-000.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test10-001.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test10-002.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test10-003.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test12-000.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test12-001.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test12-002.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  img_dir + '/default_os-ci-test12-003.qcow2',
-                  '10000000000']),
-            call(['ssh', 'root@bar', 'mkdir', '-p',
-                  '/tmp/default_os-ci-test4_data']),
-            call(['scp', '-q', '-r', mock.ANY,
-                  'root@bar:/tmp/default_os-ci-test4_data/meta-data']),
-            call(['scp', '-q', '-r', mock.ANY,
-                  'root@bar:/tmp/default_os-ci-test4_data/user-data']),
-            call(['ssh', 'root@bar', 'genisoimage', '-quiet', '-output',
-                  img_dir + '/default_os-ci-test4_cloud-init.iso', '-volid',
-                  'cidata', '-joliet',
-                  '-rock',
-                  '/tmp/default_os-ci-test4_data/user-data',
-                  '/tmp/default_os-ci-test4_data/meta-data']),
-            call(['ssh', 'root@bar', 'qemu-img', 'create', '-q', '-f', 'qcow2',
-                  '-b', img_dir + '/install-server-RH7.0-I.1.3.0.img.qcow2',
-                  img_dir + '/default_os-ci-test4-000.qcow2',
-                  '30G']),
-            call(['ssh', 'root@bar', 'qemu-img', 'resize', '-q',
-                  img_dir + '/default_os-ci-test4-000.qcow2',
-                  '30G'])
-        ])
-        self.assertEqual(sub_call.call_count, 14)
+        self.virtualizor.main(['virt_platform_qcow2.yml.sample', 'bar',
+                               '--pub-key-file',
+                               'virt_platform_qcow2.yml.sample'])
+        self.assertEqual(sub_call.call_count, 36)
         self.assertEqual(libvirt_conn.networkCreateXML.call_count, 1)
         self.assertEqual(libvirt_conn.defineXML.call_count, 3)
 
     @mock.patch('virtualizor.subprocess.call')
     def test_main_with_replace(self, sub_call):
-        self.virtualizor.main(['--replace', 'virt_platform.yml.sample', 'bar',
-                               '--pub-key-file', 'virt_platform.yml.sample'])
-        self.assertEqual(sub_call.call_count, 18)
+        self.virtualizor.main(['--replace', 'virt_platform_qcow2.yml.sample',
+                               'bar', '--pub-key-file',
+                               'virt_platform_qcow2.yml.sample'])
+        self.assertEqual(sub_call.call_count, 49)
         self.assertEqual(libvirt_conn.networkCreateXML.call_count, 2)
         self.assertEqual(libvirt_conn.defineXML.call_count, 4)
 

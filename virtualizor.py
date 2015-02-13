@@ -201,15 +201,6 @@ class Host(object):
 {% endif %}
     </disk>
 {% endfor %}
-{% if is_install_server is defined %}
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='raw'/>
-      <source
-        file='/var/lib/libvirt/images/{{
-          hostname_with_prefix }}_cloud-init.iso'/>
-      <target dev='vdz' bus='virtio'/>
-    </disk>
-{% endif %}
 {% for nic in nics %}
 {% if nic.network_name is defined %}
     <interface type='network'>
@@ -259,28 +250,25 @@ write_files:
     content: |
       Defaults:jenkins !requiretty
       jenkins ALL=(ALL) NOPASSWD:ALL
-  - path: /etc/sysconfig/network-scripts/ifcfg-eth0
+{% for nic in nics %}
+  - path: /etc/sysconfig/network-scripts/ifcfg-{{ nic.name }}
     content: |
-      DEVICE=eth0
+      DEVICE={{ nic.name }}
+      ONBOOT=yes
+{% if nic.ip is defined %}
       BOOTPROTO=none
-      ONBOOT=yes
-      IPADDR={{ ip }}
-      NETWORK={{ network }}
-      NETMASK={{ netmask }}
-# Do not set the default GW to avoid conflict
-# with the outgoing route on eth1
-#      GATEWAY={{ gateway }}
-  - path: /etc/sysconfig/network-scripts/ifcfg-eth1
-    content: |
-      DEVICE=eth1
+      IPADDR={{ nic.ip }}
+      NETWORK={{ nic.network }}
+      NETMASK={{ nic.netmask }}
+{% else %}
       BOOTPROTO=dhcp
-      ONBOOT=yes
+{% endif %}
+{% endfor %}
   - path: /etc/sysconfig/network
     content: |
       NETWORKING=yes
       NOZEROCONF=no
       HOSTNAME={{ hostname }}
-#      GATEWAY={{ gateway }}
   - path: /etc/sysctl.conf
     content: |
       net.ipv4.ip_forward = 1
@@ -310,6 +298,7 @@ local-hostname: {{ hostname }}
                      'memory': 8,
                      'ncpus': 1,
                      'cpus': [], 'disks': [], 'nics': []}
+        self.disk_cpt = 0
 
         for k in ('uuid', 'serial', 'product_name',
                   'memory', 'ncpus', 'is_install_server'):
@@ -320,42 +309,33 @@ local-hostname: {{ hostname }}
         if definition['profile'] == 'install-server':
             logging.info("  This is the install-server")
             self.meta['is_install_server'] = True
-            definition['disks'] = [
-                {'name': 'vda',
-                 'size': '30G',
-                 'clone_from':
-                     '/var/lib/libvirt/images/install-server-%s.img.qcow2' %
-                         install_server_info['version']}
-            ]
             definition['nics'].append({
                 'mac': install_server_info['mac'],
                 'network_name': conf.public_network
             })
-            self.prepare_cloud_init(
-                ip=install_server_info['ip'],
-                network=install_server_info['network'],
-                netmask=install_server_info['netmask'],
-                gateway=install_server_info['gateway'])
 
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         self.template = env.from_string(Host.host_template_string)
 
-        self.register_disks(definition)
-        self.register_nics(definition)
+        for nic in definition['nics']:
+            self.register_nic(nic)
+        for disk in definition['disks']:
+            self.initialize_disk(disk)
+            self.register_disk(disk)
+        if 'image' in definition['disks'][0]:
+            cloud_init_image = self.create_cloud_init_image()
+            self.register_disk(cloud_init_image)
 
         self.meta['nics'][0]['boot_order'] = 2
         self.meta['disks'][0]['boot_order'] = 1
 
-    def prepare_cloud_init(self, ip, network, netmask, gateway):
+    def create_cloud_init_image(self):
 
         ssh_key_file = self.conf.pub_key_file
         meta = {
             'ssh_keys': open(ssh_key_file).readlines(),
             'hostname': self.hostname,
-            'ip': ip,
-            'network': network,
-            'netmask': netmask,
-            'gateway': gateway
+            'nics': self.meta['nics']
         }
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         contents = {
@@ -371,50 +351,56 @@ local-hostname: {{ hostname }}
             fd.flush()
             self.hypervisor.push(fd.name, data_dir + '/' + name)
 
-        self.hypervisor.call(
-            'genisoimage', '-quiet', '-output',
-            "%s/%s_cloud-init.iso" % (
+        image = '%s/%s_cloud-init.qcow2' % (
                 Host.host_libvirt_image_dir,
-                self.hostname_with_prefix),
-            '-volid', 'cidata', '-joliet', '-rock',
-            data_dir + '/user-data', data_dir + '/meta-data')
+                self.hostname_with_prefix)
+        self.hypervisor.call(
+            'truncate', '--size', '2M', image + '.tmp')
+        self.hypervisor.call(
+            'mkfs.vfat', '-n', 'cidata', image + '.tmp')
+        self.hypervisor.call(
+            'mcopy', '-oi', image + '.tmp',
+            data_dir + '/user-data', data_dir + '/meta-data', '::')
+        self.hypervisor.call(
+            'qemu-img', 'convert', '-O', 'qcow2', image + '.tmp', image)
+        self.hypervisor.call(
+            'rm', image + '.tmp')
+        return({'path': image})
 
-    def register_disks(self, definition):
-        cpt = 0
-        for info in definition['disks']:
-            filename = "%s-%03d.qcow2" % (self.hostname_with_prefix, cpt)
-            if 'clone_from' in info:
-                self.hypervisor.call(
-                    'qemu-img', 'create', '-q', '-f', 'qcow2',
-                    '-b', info['clone_from'],
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    info['size'])
-                self.hypervisor.call(
-                    'qemu-img', 'resize', '-q',
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    canical_size(info['size']))
-            else:
-                self.hypervisor.call(
-                    'qemu-img', 'create', '-q', '-f', 'qcow2',
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    canical_size(info['size']))
+    def initialize_disk(self, disk):
+        disk_cpt = len(self.meta['disks'])
+        filename = "%s-%03d.qcow2" % (self.hostname_with_prefix, disk_cpt)
+        if 'image' in disk:
+            self.hypervisor.call(
+                'qemu-img', 'create', '-q', '-f', 'qcow2',
+                '-b', disk['image'],
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
+            self.hypervisor.call(
+                'qemu-img', 'resize', '-q',
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
+        else:
+            self.hypervisor.call(
+                'qemu-img', 'create', '-q', '-f', 'qcow2',
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
 
-            info.update({
-                'name': 'vd' + string.ascii_lowercase[cpt],
-                'path': Host.host_libvirt_image_dir + '/' + filename})
-            self.meta['disks'].append(info)
-            cpt += 1
+        disk.update({'path': Host.host_libvirt_image_dir + '/' + filename})
 
-    def register_nics(self, definition):
-        i = 0
+    def register_disk(self, disk):
+        disk_cpt = len(self.meta['disks'])
+        disk['name'] = 'vd' + string.ascii_lowercase[disk_cpt]
+        self.meta['disks'].append(disk)
 
-        for info in definition['nics']:
-            self.meta['nics'].append({
-                'mac': info.get('mac', random_mac()),
-                'name': info.get('name', 'noname%i' % i),
-                'network_name': info.get(
-                    'network_name', '%s_sps' % self.conf.prefix)})
-            i += 1
+    def register_nic(self, nic):
+        default = {
+            'mac': random_mac(),
+            'name': 'eth%i' % len(self.meta['nics']),
+            'network_name': '%s_sps' % self.conf.prefix
+        }
+        default.update(nic)
+        self.meta['nics'].append(default)
 
     def dump_libvirt_xml(self):
         return self.template.render(self.meta)
