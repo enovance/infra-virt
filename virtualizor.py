@@ -201,15 +201,6 @@ class Host(object):
 {% endif %}
     </disk>
 {% endfor %}
-{% if is_install_server is defined %}
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2'/>
-      <source
-        file='/var/lib/libvirt/images/{{
-          hostname_with_prefix }}_cloud-init.qcow2'/>
-      <target dev='vdz' bus='virtio'/>
-    </disk>
-{% endif %}
 {% for nic in nics %}
 {% if nic.network_name is defined %}
     <interface type='network'>
@@ -310,6 +301,7 @@ local-hostname: {{ hostname }}
                      'memory': 4194304,
                      'ncpus': 1,
                      'cpus': [], 'disks': [], 'nics': []}
+        self.disk_cpt = 0
 
         for k in ('uuid', 'serial', 'product_name',
                   'memory', 'ncpus', 'is_install_server'):
@@ -324,22 +316,26 @@ local-hostname: {{ hostname }}
                 'mac': install_server_info['mac'],
                 'network_name': conf.public_network
             })
-            self.prepare_cloud_init(
-                ip=install_server_info['ip'],
-                network=install_server_info['network'],
-                netmask=install_server_info['netmask'],
-                gateway=install_server_info['gateway'])
 
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         self.template = env.from_string(Host.host_template_string)
 
-        self.register_disks(definition)
+        for disk in definition['disks']:
+            self.initialize_disk(disk)
+            self.register_disk(disk)
+        if 'image' in definition['disks'][0]:
+            cloud_init_image = self.create_cloud_init_image(
+                ip=install_server_info['ip'],
+                network=install_server_info['network'],
+                netmask=install_server_info['netmask'],
+                gateway=install_server_info['gateway'])
+            self.register_disk(cloud_init_image)
         self.register_nics(definition)
 
         self.meta['nics'][0]['boot_order'] = 2
         self.meta['disks'][0]['boot_order'] = 1
 
-    def prepare_cloud_init(self, ip, network, netmask, gateway):
+    def create_cloud_init_image(self, ip, network, netmask, gateway):
 
         ssh_key_file = self.conf.pub_key_file
         meta = {
@@ -377,33 +373,34 @@ local-hostname: {{ hostname }}
         self.hypervisor.call(
             'qemu-img', 'convert', '-O', 'qcow2', image + '.tmp', image)
         self.hypervisor.call(
-            'rm', 'qcow2', image + '.tmp')
+            'rm', image + '.tmp')
+        return({'path': image})
 
-    def register_disks(self, definition):
-        cpt = 0
-        for info in definition['disks']:
-            filename = "%s-%03d.qcow2" % (self.hostname_with_prefix, cpt)
-            if 'image' in info:
-                self.hypervisor.call(
-                    'qemu-img', 'create', '-q', '-f', 'qcow2',
-                    '-b', info['image'],
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    canical_size(info['size']))
-                self.hypervisor.call(
-                    'qemu-img', 'resize', '-q',
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    canical_size(info['size']))
-            else:
-                self.hypervisor.call(
-                    'qemu-img', 'create', '-q', '-f', 'qcow2',
-                    Host.host_libvirt_image_dir + '/' + filename,
-                    canical_size(info['size']))
+    def initialize_disk(self, disk):
+        disk_cpt = len(self.meta['disks'])
+        filename = "%s-%03d.qcow2" % (self.hostname_with_prefix, disk_cpt)
+        if 'image' in disk:
+            self.hypervisor.call(
+                'qemu-img', 'create', '-q', '-f', 'qcow2',
+                '-b', disk['image'],
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
+            self.hypervisor.call(
+                'qemu-img', 'resize', '-q',
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
+        else:
+            self.hypervisor.call(
+                'qemu-img', 'create', '-q', '-f', 'qcow2',
+                Host.host_libvirt_image_dir + '/' + filename,
+                canical_size(disk['size']))
 
-            info.update({
-                'name': 'vd' + string.ascii_lowercase[cpt],
-                'path': Host.host_libvirt_image_dir + '/' + filename})
-            self.meta['disks'].append(info)
-            cpt += 1
+        disk.update({'path': Host.host_libvirt_image_dir + '/' + filename})
+
+    def register_disk(self, disk):
+        disk_cpt = len(self.meta['disks'])
+        disk['name'] = 'vd' + string.ascii_lowercase[disk_cpt]
+        self.meta['disks'].append(disk)
 
     def register_nics(self, definition):
         i = 0

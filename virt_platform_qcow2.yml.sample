@@ -8,6 +8,11 @@ hosts:
     - size: 10Gi
     nics:
     - mac: d8:9d:67:1a:8f:58
+      ip: 196.168.68.54
+      name: eth0
+      netmask: 255.255.255.0
+      gateway: 196.168.68.48
+      network: 196.168.68.0
     - mac: d8:9d:67:1a:8f:59
     profile: openstack-full
   os-ci-test11:
@@ -19,6 +24,11 @@ hosts:
     - size: 10Gi
     nics:
     - mac: d8:9d:67:1a:41:7c
+      ip: 196.168.68.55
+      name: eth0
+      netmask: 255.255.255.0
+      gateway: 196.168.68.48
+      network: 196.168.68.0
     - mac: d8:9d:67:1a:41:7d
     profile: openstack-full
   os-ci-test12:
@@ -30,6 +40,11 @@ hosts:
     - size: 10Gi
     nics:
     - mac: d8:9d:67:32:12:a4
+      ip: 196.168.68.56
+      name: eth0
+      netmask: 255.255.255.0
+      gateway: 196.168.68.48
+      network: 196.168.68.0
     - mac: d8:9d:67:32:12:a5
     profile: openstack-full
   os-ci-test4:
@@ -37,8 +52,8 @@ hosts:
     - size: 20Gi
       image: install-server-RH7.0-I.1.3.0.img.qcow2
     nics:
-    - ip: 10.151.68.48
+    - ip: 196.168.68.48
       name: eth0
       netmask: 255.255.255.0
-      network: 10.151.68.0
+      network: 196.168.68.0
     profile: install-server
