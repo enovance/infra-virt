@@ -29,7 +29,7 @@ class TestCollector(unittest.TestCase):
     def test_collect(self):
         virt_platform = collector.collect(_CONFIG_PATH, False, "sps_version")
         self.assertTrue("hosts" in virt_platform)
-        self.assertEqual(len(virt_platform["hosts"]), 4)
+        self.assertEqual(len(virt_platform["hosts"]), 5)
 
         for host in ['node1', 'node2', 'node3']:
             self.assertTrue("disks" in virt_platform["hosts"][host])

@@ -15,9 +15,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from hardware import cmdb
 from hardware import generate
 from hardware import state
 
+import glob
 import netaddr
 import os
 import sys
@@ -35,6 +37,29 @@ def _get_yaml_content(path):
     except (OSError, IOError) as e:
         print("Error: cannot open or read file '%s': %s" % (path, e))
         sys.exit(1)
+
+INT_DHCP = {"bootproto": "dhcp",
+            "name": "eth1",
+            "nat": True,
+            "network_name": "__public_network__"}
+
+
+def _get_router_nic(config_path):
+    cmdb_files = glob.glob("%s/edeploy/*.cmdb" % config_path)
+    cmdb_files = [os.path.splitext(os.path.basename(cmdb_file))[0]
+                  for cmdb_file in cmdb_files]
+
+    for cmdb_file in cmdb_files:
+        loaded_cmdb = cmdb.load_cmdb("%s/edeploy/" % config_path, cmdb_file)
+        for host in loaded_cmdb:
+            if "gateway" in host and "netmask" in host:
+                net = netaddr.IPNetwork("%s/%s" % (host["gateway"],
+                                                   host["netmask"])).network
+
+                return {"ip": host["gateway"],
+                        "name": "eth0",
+                        "netmask": host["netmask"],
+                        "network": str(net)}
 
 
 def collect(config_path, qcow, sps_version):
@@ -55,6 +80,18 @@ def collect(config_path, qcow, sps_version):
     # the virtual configuration of each host
     virt_platform = {"hosts": {}}
 
+    # adds router
+    virt_platform["hosts"]["router"] = {}
+    img = "%s-%s.img.qcow2" % ("install-server", sps_version)
+    virt_platform["hosts"]["router"]["disks"] = [{'size': '15Gi',
+                                                  'image': img}]
+
+    virt_platform["hosts"]["router"]["nics"] = [_get_router_nic(config_path)]
+    virt_platform["hosts"]["router"]["nics"].append(dict(INT_DHCP))
+
+    gateway = virt_platform["hosts"]["router"]["nics"][0]["ip"]
+
+    # adds hardware info to the hosts
     for hostname in global_conf["hosts"]:
         # construct the host virtual configuration
         virt_platform["hosts"][hostname] = state_obj.hardware_info(hostname)
@@ -70,11 +107,12 @@ def collect(config_path, qcow, sps_version):
         virt_platform["hosts"][hostname]["profile"] = \
             global_conf["hosts"][hostname]["profile"]
 
+        virt_platform["hosts"][hostname]["nics"][0].update(
+            {"gateway": gateway})
+
     # release the lock obtained during the load call
     state_obj.unlock()
 
-    # so far, the nodes are described excepted the install-server
-    # the code below adds the install-server from the global conf.
     for hostname in global_conf["hosts"]:
         admin_network = global_conf["config"]["admin_network"]
         admin_network = netaddr.IPNetwork(admin_network)
@@ -88,6 +126,8 @@ def collect(config_path, qcow, sps_version):
             "ip": global_conf["hosts"][hostname]["ip"],
             "network": str(admin_network.network),
             "netmask": str(admin_network.netmask)})
+        if global_conf["hosts"][hostname]["profile"] == "install-server":
+            nics.append(dict(INT_DHCP))
         virt_platform["hosts"][hostname]["nics"] = nics
 
     return virt_platform
