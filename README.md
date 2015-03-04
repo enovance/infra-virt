@@ -1,6 +1,6 @@
 [![Build Status](https://travis-ci.org/enovance/infra-virt.svg?branch=master)](https://travis-ci.org/enovance/infra-virt)
 
-/ test2 / Test3
+testou
 
 # Virtualization
 
