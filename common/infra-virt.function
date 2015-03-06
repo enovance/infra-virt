@@ -137,6 +137,13 @@ snapshot_restore() {
             ssh $SSHOPTS root@os-ci-test\${id} killall epmd || true
         done
         while true; do
+            for id in 12 11 10; do
+                ssh $SSHOPTS root@os-ci-test\${id} systemctl status mongod.service|grep 'Active: active' && break 2
+                ssh $SSHOPTS root@os-ci-test\${id} systemctl restart mongod.service || continue
+            done
+            break
+        done
+        while true; do
             for id in 10 11 12; do
             (
             set -eux
