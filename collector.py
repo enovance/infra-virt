@@ -65,6 +65,8 @@ def _get_router_nic(config_path):
                         "name": "eth0",
                         "netmask": netmask,
                         "network": str(net)}
+    print("Error: Cannot find a gateway in the .cmdb files.")
+    sys.exit(1)
 
     print("Gateway not available.")
     sys.exit(1)
