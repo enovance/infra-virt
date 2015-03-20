@@ -312,7 +312,16 @@ class Host(object):
                 'content': host_template.PRIVATE_SSH_KEY
             }
         ]
+        for f in default_user_data:
+            if f['path'] in [e['path'] for e in user_data['write_files']]:
+                logging.debug("%s already defined in cloud_init write_files "
+                              "section. We ignore the NIC network settings for "
+                              "node %s." % (f['path'], self.hostname))
+                continue
+            user_data['write_files'].append(f)
+
         for nic in self.meta['nics']:
+            # TODO(Gonéri): duplicated code
             path = '/etc/sysconfig/network-scripts/ifcfg-' + nic['name']
             if path in [e['path'] for e in user_data['write_files']]:
                 logging.debug("%s already defined in cloud_init write_files "
