@@ -214,8 +214,9 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
                 "name": "eth0",
                 "ip": global_conf["hosts"][hostname]["ip"],
                 "network": str(admin_network.network),
-                "netmask": str(admin_network.netmask),
-                "gateway": gateway})
+                "netmask": str(admin_network.netmask)})
+            if gateway in admin_network:
+                nics[0]['gateway'] = gateway
         if global_conf["hosts"][hostname]["profile"] == "install-server":
             nics.append(dict(INT_DHCP))
         virt_platform["hosts"][hostname]["nics"] = nics
