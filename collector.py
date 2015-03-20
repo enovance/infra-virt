@@ -23,9 +23,11 @@ import argparse
 import glob
 import netaddr
 import os
+import re
 import sys
 
 import requests
+import six
 import yaml
 
 _VERSION = "0.0.1"
@@ -40,34 +42,100 @@ def _get_yaml_content(path):
         sys.exit(1)
 
 INT_DHCP = {"bootproto": "dhcp",
-            "name": "eth1",
             "nat": True,
             "network_name": "__public_network__"}
 
 
-def _get_router_nic(config_path):
+def _get_router_nics(config_path, global_conf):
     cmdb_files = glob.glob("%s/edeploy/*.cmdb" % config_path)
     cmdb_files = [os.path.splitext(os.path.basename(cmdb_file))[0]
                   for cmdb_file in cmdb_files]
 
-    gateway, netmask = None, None
+    detected_net = {}
+    for k, v in six.iteritems(global_conf['config']):
+        m = re.search('(\w+)_(ip|netif|network)', k)
+        if not m:
+            continue
+        net_name = m.group(1)
+        if net_name not in detected_net:
+            detected_net[net_name] = {}
+        val_type = m.group(2)
+        if val_type == 'netif':
+            detected_net[net_name]['name'] = v
+        elif val_type == 'ip':
+            pass
+        elif val_type == 'network':
+            detected_net[net_name]['netobj'] = netaddr.IPNetwork(v)
+        else:
+            print("type not supported: %s" % val_type)
+
     for cmdb_file in cmdb_files:
         loaded_cmdb = cmdb.load_cmdb("%s/edeploy/" % config_path, cmdb_file)
         for host in loaded_cmdb:
-            if "gateway" in host and "netmask" in host:
-                gateway, netmask = host["gateway"], host["netmask"]
-            elif "gateway-admin" in host and "netmask-admin" in host:
-                gateway, netmask = host["gateway-admin"], host["netmask-admin"]
+            for k, v in six.iteritems(host):
+                m = re.search('(vlan|gateway|netmask|network)(-(\w+|)|)', k)
+                if not m:
+                    continue
+                net_name = m.group(3)
+                val_type = m.group(1)
+                if not net_name:
+                    net_name = 'admin'
 
-            if gateway and netmask:
-                net = netaddr.IPNetwork("%s/%s" % (gateway, netmask)).network
-                return {"ip": gateway,
-                        "name": "eth0",
-                        "netmask": netmask,
-                        "network": str(net)}
+                if net_name not in detected_net:
+                    detected_net[net_name] = {}
 
-    print("Gateway not available.")
-    sys.exit(1)
+                # TODO(Gonéri): We should directly store the vlan ID in the
+                # vlan key to avoid this ask
+                if val_type == 'vlan' and 'name' not in detected_net[net_name]:
+                    detected_net[net_name]['name'] = ("ethX.%s" % v)
+                elif val_type == 'network':
+                    detected_net[net_name]['netobj'] = netaddr.IPNetwork(v)
+                else:
+                    detected_net[net_name][val_type] = v
+
+    for host in global_conf['hosts']:
+        ip = global_conf['hosts'][host]['ip']
+        found = False
+        for net in detected_net.values():
+            if 'netobj' in net and ip in net['netobj']:
+                found = True
+                continue
+        if not found:
+            detected_net[host + '-net'] = {
+                'netobj': netaddr.IPNetwork(ip + '/24')
+            }
+    nics = {}
+    for net in detected_net.values():
+        if 'netobj' not in net:
+            continue
+        netobj = net['netobj']
+
+        if netobj not in nics:
+            nics[netobj] = {}
+        if 'name' in net and 'name' not in nics[netobj]:
+            nics[netobj]['name'] = net['name']
+        if 'gateway' in net:
+            nics[netobj]['ip'] = net['gateway']
+        try:
+            nics[netobj]['ip'] = net['gateway']
+        except KeyError:
+            pass
+        nics[netobj]['netmask'] = str(net['netobj'].netmask)
+        nics[netobj]['network'] = str(net['netobj'].network)
+
+    i = 0
+    for netobj, entry in six.iteritems(nics):
+        try:
+            m = re.search('\.(\d+)$', entry['name'])
+            entry['name'] = 'eth%d.%s' % (i, m.group(1))
+            entry['vlan'] = True
+        except KeyError:
+            entry['name'] = 'eth%d' % i
+        if 'ip' not in entry:
+            print("Cannot find the gateway for network %s." % netobj)
+        i += 1
+
+    return nics.values()
 
 
 def _get_files(config_path):
@@ -86,7 +154,6 @@ def _get_files(config_path):
             return {}
 
         for host in loaded_cmdb:
-            import re
             files[host['hostname']] = []
             for line in re.findall(r'(config\([\s\S\n]*?)\)\n',
                                    configure_file_content, re.MULTILINE):
@@ -155,7 +222,8 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     if checksum:
         virt_platform["hosts"]["router"]["disks"][0]['checksum'] = checksum
 
-    virt_platform["hosts"]["router"]["nics"] = [_get_router_nic(config_path)]
+    virt_platform["hosts"]["router"]["nics"] = _get_router_nics(config_path,
+                                                                global_conf)
     virt_platform["hosts"]["router"]["nics"].append(dict(INT_DHCP))
 
     gateway = virt_platform["hosts"]["router"]["nics"][0]["ip"]
