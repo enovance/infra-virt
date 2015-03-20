@@ -26,7 +26,6 @@ import os
 import sys
 
 import requests
-import six
 import yaml
 
 _VERSION = "0.0.1"
@@ -189,6 +188,7 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     # release the lock obtained during the load call
     state_obj.unlock()
 
+    configure_files = _get_files(config_path)
     # adds network info to the hosts
     for hostname in global_conf["hosts"]:
         admin_network = global_conf["config"]["admin_network"]
@@ -198,26 +198,30 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
         except KeyError:
             nics = [{}]
 
-        nics[0].update({
-            "name": "eth0",
-            "ip": global_conf["hosts"][hostname]["ip"],
-            "network": str(admin_network.network),
-            "netmask": str(admin_network.netmask),
-            "gateway": gateway})
+        network_configuration = "file" if parse_configure_files else "standard"
+
+        if network_configuration == "file":
+            try:
+                virt_platform["hosts"][hostname]['files'] \
+                    = configure_files[hostname]
+            except KeyError:
+                print("no network configure scripts for node %s. "
+                      "Switch to the standard configuration system." % hostname)
+                network_configuration = "standard"
+
+        if network_configuration == "standard":
+            nics[0].update({
+                "name": "eth0",
+                "ip": global_conf["hosts"][hostname]["ip"],
+                "network": str(admin_network.network),
+                "netmask": str(admin_network.netmask),
+                "gateway": gateway})
         if global_conf["hosts"][hostname]["profile"] == "install-server":
             nics.append(dict(INT_DHCP))
         virt_platform["hosts"][hostname]["nics"] = nics
 
     if images_url:
         virt_platform["images-url"] = "%s/%s" % (images_url, sps_version)
-
-    if parse_configure_files:
-        for hostname, data in six.iteritems(_get_files(config_path)):
-            try:
-                virt_platform["hosts"][hostname]['files'] = data
-            except KeyError:
-                print("Skip node %s" % hostname)
-
     return virt_platform
 
 
