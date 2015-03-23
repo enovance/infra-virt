@@ -336,6 +336,7 @@ class Host(object):
                        "NETWORK=%(network)s\n"
                        "NETMASK=%(netmask)s\n"
                        "GATEWAY=%(gateway)s\n"
+                       "PEERDNS=no\n"
                        "BOOTPROTO=%(bootproto)s\n") % nic
             if nic['vlan']:
                 content += "VLAN=yes\n"
