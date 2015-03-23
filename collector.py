@@ -41,10 +41,6 @@ def _get_yaml_content(path):
         print("Error: cannot open or read file '%s': %s" % (path, e))
         sys.exit(1)
 
-INT_DHCP = {"bootproto": "dhcp",
-            "nat": True,
-            "network_name": "__public_network__"}
-
 
 def _get_router_configurations(config_path, global_conf):
     cmdb_files = glob.glob("%s/edeploy/*.cmdb" % config_path)
@@ -225,7 +221,10 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     router_configurations = _get_router_configurations(config_path, global_conf)
     router_nics = [n for n in router_configurations.values() if 'ip' in n]
     virt_platform["hosts"]["router"]["nics"] = router_nics
-    virt_platform["hosts"]["router"]["nics"].append(dict(INT_DHCP))
+    virt_platform["hosts"]["router"]["nics"].append({
+        "bootproto": "dhcp",
+        "nat": True,
+        "network_name": "__public_network__"})
 
     # adds hardware info to the hosts
     for hostname in global_conf["hosts"]:
@@ -286,7 +285,9 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
                 if str(netobj) == str(admin_network):
                     nics[0]['gateway'] = entry['ip']
         if global_conf["hosts"][hostname]["profile"] == "install-server":
-            nics.append(dict(INT_DHCP))
+            nics.append({
+                "bootproto": "dhcp",
+                "network_name": "__public_network__"})
         virt_platform["hosts"][hostname]["nics"] = nics
 
     if images_url:
