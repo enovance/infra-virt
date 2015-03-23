@@ -46,7 +46,7 @@ INT_DHCP = {"bootproto": "dhcp",
             "network_name": "__public_network__"}
 
 
-def _get_router_nics(config_path, global_conf):
+def _get_router_configurations(config_path, global_conf):
     cmdb_files = glob.glob("%s/edeploy/*.cmdb" % config_path)
     cmdb_files = [os.path.splitext(os.path.basename(cmdb_file))[0]
                   for cmdb_file in cmdb_files]
@@ -135,7 +135,7 @@ def _get_router_nics(config_path, global_conf):
             print("Cannot find the gateway for network %s." % netobj)
         i += 1
 
-    return nics.values()
+    return nics
 
 
 def _get_files(config_path):
@@ -222,11 +222,10 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     if checksum:
         virt_platform["hosts"]["router"]["disks"][0]['checksum'] = checksum
 
-    virt_platform["hosts"]["router"]["nics"] = _get_router_nics(config_path,
-                                                                global_conf)
+    router_configurations = _get_router_configurations(config_path, global_conf)
+    router_nics = [n for n in router_configurations.values() if 'ip' in n]
+    virt_platform["hosts"]["router"]["nics"] = router_nics
     virt_platform["hosts"]["router"]["nics"].append(dict(INT_DHCP))
-
-    gateway = virt_platform["hosts"]["router"]["nics"][0]["ip"]
 
     # adds hardware info to the hosts
     for hostname in global_conf["hosts"]:
@@ -283,8 +282,9 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
                 "ip": global_conf["hosts"][hostname]["ip"],
                 "network": str(admin_network.network),
                 "netmask": str(admin_network.netmask)})
-            if gateway in admin_network:
-                nics[0]['gateway'] = gateway
+            for netobj, entry in six.iteritems(router_configurations):
+                if str(netobj) == str(admin_network):
+                    nics[0]['gateway'] = entry['ip']
         if global_conf["hosts"][hostname]["profile"] == "install-server":
             nics.append(dict(INT_DHCP))
         virt_platform["hosts"][hostname]["nics"] = nics
