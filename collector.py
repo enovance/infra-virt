@@ -23,6 +23,7 @@ import argparse
 import glob
 import netaddr
 import os
+import re
 import sys
 
 import requests
@@ -40,35 +41,85 @@ def _get_yaml_content(path):
         print("Error: cannot open or read file '%s': %s" % (path, e))
         sys.exit(1)
 
-INT_DHCP = {"bootproto": "dhcp",
-            "name": "eth1",
-            "nat": True,
-            "network_name": "__public_network__"}
 
-
-def _get_router_nic(config_path):
+def _get_router_configurations(config_path, global_conf):
     cmdb_files = glob.glob("%s/edeploy/*.cmdb" % config_path)
     cmdb_files = [os.path.splitext(os.path.basename(cmdb_file))[0]
                   for cmdb_file in cmdb_files]
 
-    gateway, netmask = None, None
+    detected_net = {}
+    for k, v in six.iteritems(global_conf['config']):
+        m = re.search('(\w+)_(ip|netif|network)', k)
+        if not m:
+            continue
+        net_name = m.group(1)
+        if net_name not in detected_net:
+            detected_net[net_name] = {}
+        val_type = m.group(2)
+        if val_type == 'netif' and v:
+            splitted = v.split('.')
+            if len(splitted) > 1:
+                detected_net[net_name]['vlan'] = splitted[1]
+        elif val_type == 'ip':
+            pass
+        elif val_type == 'network':
+            detected_net[net_name]['netobj'] = netaddr.IPNetwork(v)
+        else:
+            print("type not supported: %s" % val_type)
+
     for cmdb_file in cmdb_files:
         loaded_cmdb = cmdb.load_cmdb("%s/edeploy/" % config_path, cmdb_file)
         for host in loaded_cmdb:
-            if "gateway" in host and "netmask" in host:
-                gateway, netmask = host["gateway"], host["netmask"]
-            elif "gateway-admin" in host and "netmask-admin" in host:
-                gateway, netmask = host["gateway-admin"], host["netmask-admin"]
+            for k, v in six.iteritems(host):
+                m = re.search('(vlan|gateway|netmask|network)(-(\w+|)|)', k)
+                if not m:
+                    continue
+                net_name = m.group(3)
+                val_type = m.group(1)
+                if not net_name:
+                    net_name = 'admin'
 
-            if gateway and netmask:
-                net = netaddr.IPNetwork("%s/%s" % (gateway, netmask)).network
-                return {"ip": gateway,
-                        "name": "eth0",
-                        "netmask": netmask,
-                        "network": str(net)}
+                if net_name not in detected_net:
+                    detected_net[net_name] = {}
 
-    print("Gateway not available.")
-    sys.exit(1)
+                if val_type == 'network':
+                    detected_net[net_name]['netobj'] = netaddr.IPNetwork(v)
+                else:
+                    detected_net[net_name][val_type] = v
+
+    for host in global_conf['hosts']:
+        ip = global_conf['hosts'][host]['ip']
+        found = False
+        for net in detected_net.values():
+            if 'netobj' in net and ip in net['netobj']:
+                found = True
+                continue
+        if not found:
+            detected_net[host + '-net'] = {
+                'netobj': netaddr.IPNetwork(ip + '/24')
+            }
+    nics = {}
+    for net in detected_net.values():
+        if 'netobj' not in net:
+            continue
+        netobj = net['netobj']
+
+        if netobj not in nics:
+            nics[netobj] = {}
+        if 'name' in net and 'name' not in nics[netobj]:
+            nics[netobj]['name'] = net['name']
+        if 'gateway' in net:
+            nics[netobj]['ip'] = net['gateway']
+        if 'vlan' in net:
+            nics[netobj]['vlan'] = int(net['vlan'])
+        nics[netobj]['netmask'] = str(net['netobj'].netmask)
+        nics[netobj]['network'] = str(net['netobj'].network)
+
+    for netobj, entry in six.iteritems(nics):
+        if 'ip' not in entry:
+            print("Cannot find the gateway for network %s." % netobj)
+
+    return nics
 
 
 def _get_files(config_path):
@@ -87,7 +138,6 @@ def _get_files(config_path):
             return {}
 
         for host in loaded_cmdb:
-            import re
             files[host['hostname']] = []
             for line in re.findall(r'(config\([\s\S\n]*?)\)\n',
                                    configure_file_content, re.MULTILINE):
@@ -156,10 +206,13 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     if checksum:
         virt_platform["hosts"]["router"]["disks"][0]['checksum'] = checksum
 
-    virt_platform["hosts"]["router"]["nics"] = [_get_router_nic(config_path)]
-    virt_platform["hosts"]["router"]["nics"].append(dict(INT_DHCP))
-
-    gateway = virt_platform["hosts"]["router"]["nics"][0]["ip"]
+    router_configurations = _get_router_configurations(config_path, global_conf)
+    router_nics = [n for n in router_configurations.values() if 'ip' in n]
+    virt_platform["hosts"]["router"]["nics"] = router_nics
+    virt_platform["hosts"]["router"]["nics"].append({
+        "bootproto": "dhcp",
+        "nat": True,
+        "network_name": "__public_network__"})
 
     # adds hardware info to the hosts
     for hostname in global_conf["hosts"]:
@@ -189,6 +242,7 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
     # release the lock obtained during the load call
     state_obj.unlock()
 
+    configure_files = _get_files(config_path)
     # adds network info to the hosts
     for hostname in global_conf["hosts"]:
         admin_network = global_conf["config"]["admin_network"]
@@ -198,26 +252,34 @@ def collect(config_path, qcow, sps_version, images_url, parse_configure_files):
         except KeyError:
             nics = [{}]
 
-        nics[0].update({
-            "name": "eth0",
-            "ip": global_conf["hosts"][hostname]["ip"],
-            "network": str(admin_network.network),
-            "netmask": str(admin_network.netmask),
-            "gateway": gateway})
+        network_configuration = "file" if parse_configure_files else "standard"
+
+        if network_configuration == "file":
+            try:
+                virt_platform["hosts"][hostname]['files'] \
+                    = configure_files[hostname]
+            except KeyError:
+                print("no network configure scripts for node %s. "
+                      "Switch to the standard configuration system." % hostname)
+                network_configuration = "standard"
+
+        if network_configuration == "standard":
+            nics[0].update({
+                "name": "eth0",
+                "ip": global_conf["hosts"][hostname]["ip"],
+                "network": str(admin_network.network),
+                "netmask": str(admin_network.netmask)})
+            for netobj, entry in six.iteritems(router_configurations):
+                if str(netobj) == str(admin_network):
+                    nics[0]['gateway'] = entry['ip']
         if global_conf["hosts"][hostname]["profile"] == "install-server":
-            nics.append(dict(INT_DHCP))
+            nics.append({
+                "bootproto": "dhcp",
+                "network_name": "__public_network__"})
         virt_platform["hosts"][hostname]["nics"] = nics
 
     if images_url:
         virt_platform["images-url"] = "%s/%s" % (images_url, sps_version)
-
-    if parse_configure_files:
-        for hostname, data in six.iteritems(_get_files(config_path)):
-            try:
-                virt_platform["hosts"][hostname]['files'] = data
-            except KeyError:
-                print("Skip node %s" % hostname)
-
     return virt_platform
 
 
