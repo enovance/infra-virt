@@ -464,6 +464,8 @@ def load_infra_description(input_file):
             # defined.
             if n['mac'] == 'none':
                 n['mac'] = random_mac()
+            if 'vlan' in n:
+                n['name'] += ('.%s' % n['vlan'])
             i += 1
     return infra_description
 

@@ -56,8 +56,10 @@ def _get_router_configurations(config_path, global_conf):
         if net_name not in detected_net:
             detected_net[net_name] = {}
         val_type = m.group(2)
-        if val_type == 'netif':
-            detected_net[net_name]['name'] = v
+        if val_type == 'netif' and v:
+            splitted = v.split('.')
+            if len(splitted) > 1:
+                detected_net[net_name]['vlan'] = splitted[1]
         elif val_type == 'ip':
             pass
         elif val_type == 'network':
@@ -80,11 +82,7 @@ def _get_router_configurations(config_path, global_conf):
                 if net_name not in detected_net:
                     detected_net[net_name] = {}
 
-                # TODO(Gonéri): We should directly store the vlan ID in the
-                # vlan key to avoid this ask
-                if val_type == 'vlan' and 'name' not in detected_net[net_name]:
-                    detected_net[net_name]['name'] = ("ethX.%s" % v)
-                elif val_type == 'network':
+                if val_type == 'network':
                     detected_net[net_name]['netobj'] = netaddr.IPNetwork(v)
                 else:
                     detected_net[net_name][val_type] = v
@@ -112,24 +110,14 @@ def _get_router_configurations(config_path, global_conf):
             nics[netobj]['name'] = net['name']
         if 'gateway' in net:
             nics[netobj]['ip'] = net['gateway']
-        try:
-            nics[netobj]['ip'] = net['gateway']
-        except KeyError:
-            pass
+        if 'vlan' in net:
+            nics[netobj]['vlan'] = int(net['vlan'])
         nics[netobj]['netmask'] = str(net['netobj'].netmask)
         nics[netobj]['network'] = str(net['netobj'].network)
 
-    i = 0
     for netobj, entry in six.iteritems(nics):
-        try:
-            m = re.search('\.(\d+)$', entry['name'])
-            entry['name'] = 'eth%d.%s' % (i, m.group(1))
-            entry['vlan'] = True
-        except KeyError:
-            entry['name'] = 'eth%d' % i
         if 'ip' not in entry:
             print("Cannot find the gateway for network %s." % netobj)
-        i += 1
 
     return nics
 
